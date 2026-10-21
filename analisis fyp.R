@@ -38,12 +38,22 @@ str(usdmyr)
 table(ron97$series_type, useNA = "ifany")
 
 # Kekalkan harga sebenar sahaja
+
+#ron97_clean <- ron97 %>%
+#  filter(series_type == "level") %>%
+#  transmute(
+#    date = as.Date(date),
+#    price_ron97 = as.numeric(ron97)
+#  ) %>%
+#  arrange(date)
+
 ron97_clean <- ron97 %>%
   filter(series_type == "level") %>%
-  transmute(
-    date = as.Date(date),
-    price_ron97 = as.numeric(ron97)
+  mutate(
+    date = dmy(date),
+    price_ron97 = ron97
   ) %>%
+  select(date, price_ron97) %>%
   arrange(date)
 head(ron97_clean)
 tail(ron97_clean)
@@ -109,6 +119,8 @@ nrow(brent_clean)
 # Skop tarikh RON97: 30 Mac 2017 hingga 30 April 2026
 ron97_filtered <- ron97_clean %>%
   filter(date >= as.Date("2017-03-30") & date <= as.Date("2026-04-30"))
+head(ron97_filtered)
+tail(ron97_filtered)
 
 # Skop tarikh eksogen (Bermula 23 Mac 2017 untuk menangkap julat minggu pertama)
 usd_filtered <- usd_clean %>%
@@ -120,6 +132,10 @@ brent_filtered <- brent_clean %>%
   filter(date >= as.Date("2017-03-23") & date <= as.Date("2026-04-30"))
 head(brent_filtered)
 tail(brent_filtered)
+
+nrow(ron97_filtered)
+nrow(usd_filtered)
+nrow(brent_filtered)
 
 # ==============================================================================
 #  BINA TINGKAP MINGGUAN (JUMAAT - RABU) & KIRA PURATA
@@ -151,18 +167,18 @@ tail(df_final)
 
 cat("\nJumlah bilangan pemerhatian (N):", nrow(df_final), "\n")
 
-# --- B. Pengesanan Nilai Hilang (Missing Values) ---
+# --- Pengesanan Nilai Hilang (Missing Values) ---
 cat("\n=== SEMAKAN NILAI HILANG ===\n")
 print(colSums(is.na(df_final)))
 df_final <- df_final %>% drop_na()
 
-# --- C. Pengesanan Data Terpencil (Outliers) ---
+# --- Pengesanan Data Terpencil (Outliers) ---
 # Menggunakan kaedah Z-score & IQR
 z_scores <- scale(df_final %>% select(price_ron97, price_brent, usd_myr))
 outliers_z <- which(abs(z_scores) > 3, arr.ind = TRUE)
 cat("\nBilangan Data Terpencil Dikesan (Z-score > 3):", nrow(outliers_z), "\n")
 
-# --- D. Ujian Kepegunan (ADF & KPSS) ---
+# --- Ujian Kepegunan (ADF & KPSS) ---
 cat("\n=== UJIAN KEPEGUNAN PADA ARAS (LEVEL) ===\n")
 print(adf.test(df_final$price_ron97))
 print(kpss.test(df_final$price_ron97))
