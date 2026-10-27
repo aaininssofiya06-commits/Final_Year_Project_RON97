@@ -14,19 +14,18 @@ library(readr)
 # IMPORT DAN BERSIHKAN SETIAP DATASET
 # ============================================================
 
-# --- 1a. RON97 (Mingguan) ---
 ron97 <- read.csv("C:/Users/User/Downloads/fyp/fuelprice 2.csv")
 ron97
-brent <- read_csv("C:/Users/User/Downloads/fyp/Crude Oil WTI Futures Historical Data latest.csv")
+brent <- read_csv("C:/Users/User/Downloads/fyp/Crude Oil WTI Futures Historical Data 2.csv")
 brent
 usdmyr <- read_csv("C:/Users/User/Downloads/fyp/daily_0900.csv")
 usdmyr
 
-names(ron)
+names(ron97)
 names(brent)
 names(usdmyr)
 
-str(ron)
+str(ron97)
 str(brent)
 str(usdmyr)
 
@@ -39,22 +38,23 @@ table(ron97$series_type, useNA = "ifany")
 
 # Kekalkan harga sebenar sahaja
 
-#ron97_clean <- ron97 %>%
-#  filter(series_type == "level") %>%
-#  transmute(
-#    date = as.Date(date),
-#    price_ron97 = as.numeric(ron97)
-#  ) %>%
-#  arrange(date)
-
 ron97_clean <- ron97 %>%
   filter(series_type == "level") %>%
-  mutate(
+  transmute(
     date = dmy(date),
-    price_ron97 = ron97
+    price_ron97 = as.numeric(ron97)
   ) %>%
-  select(date, price_ron97) %>%
   arrange(date)
+
+#ron97_clean <- ron97 %>%
+#  filter(series_type == "level") %>%
+#  mutate(
+#    date = dmy(date),
+#    price_ron97 = ron97
+#  ) %>%
+#  select(date, price_ron97) %>%
+#  arrange(date)
+
 head(ron97_clean)
 tail(ron97_clean)
 
@@ -113,23 +113,23 @@ sum(duplicated(brent_clean))
 nrow(brent_clean)
 
 # ==============================================================================
-#  TAPIS DATASET MENGIKUT SKOP KAJIAN (APRIL 2017 - APRIL 2026)
+#  TAPIS DATASET MENGIKUT SKOP KAJIAN (APRIL 2017 - SEPT 2026)
 # ==============================================================================
 
-# Skop tarikh RON97: 30 Mac 2017 hingga 30 April 2026
+# Skop tarikh RON97: 30 Mac 2017 hingga 30 Sept 2026
 ron97_filtered <- ron97_clean %>%
-  filter(date >= as.Date("2017-03-30") & date <= as.Date("2026-04-30"))
+  filter(date >= as.Date("2017-03-30") & date <= as.Date("2026-09-30"))
 head(ron97_filtered)
 tail(ron97_filtered)
 
 # Skop tarikh eksogen (Bermula 23 Mac 2017 untuk menangkap julat minggu pertama)
 usd_filtered <- usd_clean %>%
-  filter(date >= as.Date("2017-03-23") & date <= as.Date("2026-04-30"))
+  filter(date >= as.Date("2017-03-23") & date <= as.Date("2026-09-30"))
 head(usd_filtered)
 tail(usd_filtered)
 
 brent_filtered <- brent_clean %>%
-  filter(date >= as.Date("2017-03-23") & date <= as.Date("2026-04-30"))
+  filter(date >= as.Date("2017-03-23") & date <= as.Date("2026-09-30"))
 head(brent_filtered)
 tail(brent_filtered)
 
@@ -140,6 +140,63 @@ nrow(brent_filtered)
 # ==============================================================================
 #  BINA TINGKAP MINGGUAN (JUMAAT - RABU) & KIRA PURATA
 # ==============================================================================
+
+
+# ==============================================================================
+# FASA 1: PEMBERSIHAN DAN PENYELARASAN DATA
+# ==============================================================================
+
+library(dplyr)
+library(lubridate)
+library(purrr)
+library(tidyr)
+library(tseries)
+library(psych)
+library(forecast)
+library(ggplot2)
+
+# ------------------------------------------------------------------------------
+# 1.1 PEMBERSIHAN DATA RON97
+# ------------------------------------------------------------------------------
+
+ron97_clean <- ron97 %>%
+  filter(series_type == "level") %>%
+  transmute(
+    date = dmy(date),
+    price_ron97 = as.numeric(ron97)
+  ) %>%
+  filter(!is.na(date)) %>%
+  arrange(date)
+
+# Tempoh kajian: April 2017 - September 2026
+ron97_filtered <- ron97_clean %>%
+  filter(
+    date >= as.Date("2017-04-01"),
+    date <= as.Date("2026-09-30")
+  )
+
+# Semakan tarikh dan bilangan pemerhatian
+cat("\n=== SEMAKAN DATA RON97 ===\n")
+cat("Bilangan pemerhatian:", nrow(ron97_filtered), "\n")
+print(range(ron97_filtered$date))
+print(head(ron97_filtered))
+print(tail(ron97_filtered))
+
+# ------------------------------------------------------------------------------
+# 1.2 SEMAKAN DATA BRENT DAN USD/MYR
+# ------------------------------------------------------------------------------
+
+# Pastikan kedua-dua pemboleh ubah tarikh ialah kelas Date
+stopifnot(inherits(brent_filtered$date, "Date"))
+stopifnot(inherits(usd_filtered$date, "Date"))
+
+cat("\n=== SEMAKAN DATA BRENT ===\n")
+cat("Bilangan pemerhatian:", nrow(brent_filtered), "\n")
+print(range(brent_filtered$date))
+
+cat("\n=== SEMAKAN DATA USD/MYR ===\n")
+cat("Bilangan pemerhatian:", nrow(usd_filtered), "\n")
+print(range(usd_filtered$date))
 
 df_final <- ron97_filtered %>%
   mutate(
@@ -178,6 +235,18 @@ z_scores <- scale(df_final %>% select(price_ron97, price_brent, usd_myr))
 outliers_z <- which(abs(z_scores) > 3, arr.ind = TRUE)
 cat("\nBilangan Data Terpencil Dikesan (Z-score > 3):", nrow(outliers_z), "\n")
 
+# Kaedah IQR
+iqr_outliers <- sapply(df_final, function(x) {
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- IQR(x, na.rm = TRUE)
+  
+  sum(x < q1 - 1.5 * iqr | x > q3 + 1.5 * iqr, na.rm = TRUE)
+})
+
+cat("\nBilangan outlier mengikut kaedah IQR:\n")
+print(iqr_outliers)
+
 # --- Ujian Kepegunan (ADF & KPSS) ---
 cat("\n=== UJIAN KEPEGUNAN PADA ARAS (LEVEL) ===\n")
 print(adf.test(df_final$price_ron97))
@@ -189,7 +258,7 @@ print(adf.test(ron97_diff))
 print(kpss.test(ron97_diff))
 
 # ==============================================================================
-# FASA 2: ANALISIS PENEROKAAN DATA (EDA) & KORELASI
+# FASA ANALISIS PENEROKAAN DATA (EDA) & KORELASI
 # ==============================================================================
 library(psych)
 library(ggplot2)
@@ -218,7 +287,7 @@ ggplot(df_plot, aes(x = date)) +
   geom_line(aes(y = MA_4, color = "MA 4-Minggu"), size = 0.8, linetype = "dashed") +
   geom_line(aes(y = MA_12, color = "MA 12-Minggu"), size = 0.8, linetype = "solid") +
   labs(
-    title = "Trend Pergerakan Harga RON97 di Malaysia (2017 - 2026)",
+    title = "Trend Pergerakan Harga RON97 di Malaysia (April 2017 - September 2026)",
     subtitle = "Analisis Trend Bersama Purata Bergerak (Moving Average)",
     x = "Tarikh",
     y = "Harga (RM / Liter)",
@@ -233,7 +302,7 @@ ggplot(df_plot, aes(x = date)) +
 # Semakan Normaliti (Shapiro-Wilk Test) untuk menentukan ujian korelasi yang sesuai
 shapiro.test(df_final$price_ron97)
 
-# Jika p-value < 0.05 (Data tidak taburan normal), gunakan Spearman. Jika tidak, Pearson.
+# p-value < 0.05 (Data tidak taburan normal), gunakan Spearman. Jika tidak, Pearson.
 cor_matrix_pearson  <- cor(df_final %>% select(price_ron97, price_brent, usd_myr), method = "pearson")
 cor_matrix_spearman <- cor(df_final %>% select(price_ron97, price_brent, usd_myr), method = "spearman")
 
@@ -244,10 +313,108 @@ print("--- MATRIKS KORELASI SPEARMAN ---")
 print(cor_matrix_spearman)
 
 # ==============================================================================
-# SEKSYEN 3.1 & 3.4: PEMBAHAGIAN DATASET & PEMBANGUNAN MODEL
+# PEMBAHAGIAN DATASET & PEMBANGUNAN MODEL
 # ==============================================================================
 
-# Pembahagian Data Kronologi: 80% Latihan (Mac 2017 - Ogos 2024), 20% Ujian (Sept 2024 - April 2026)
+# Data pemodelan: April 2017 - Julai 2026
+df_model <- df_final %>%
+  filter(
+    date >= as.Date("2017-04-01"),
+    date <= as.Date("2026-07-31")
+  ) %>%
+  arrange(date)
+
+# Data ramalan akhir: Ogos - September 2026
+df_future <- df_final %>%
+  filter(
+    date >= as.Date("2026-08-01"),
+    date <= as.Date("2026-09-30")
+  ) %>%
+  arrange(date)
+
+cat("\n=== TEMPOH DATA PEMODELAN ===\n")
+cat("Bilangan pemerhatian:", nrow(df_model), "\n")
+print(range(df_model$date))
+
+cat("\n=== TEMPOH DATA RAMALAN AKHIR ===\n")
+cat("Bilangan pemerhatian:", nrow(df_future), "\n")
+
+if (nrow(df_future) > 0) {
+  print(range(df_future$date))
+}
+
+# Pastikan tiada nilai hilang
+stopifnot(!anyNA(df_model))
+stopifnot(!anyNA(df_future))
+
+# Semak sela tarikh mingguan
+cat("\n=== SEMAKAN SELA TARIKH DATA PEMODELAN ===\n")
+print(table(as.integer(diff(df_model$date))))
+
+# Jika terdapat sela selain 7 hari, periksa minggu yang hilang
+missing_intervals <- which(as.integer(diff(df_model$date)) != 7)
+
+if (length(missing_intervals) > 0) {
+  cat("Amaran: terdapat sela tarikh yang bukan 7 hari.\n")
+  print(df_model$date[missing_intervals])
+  print(df_model$date[missing_intervals + 1])
+}
+
+# Semak data asal sekitar tarikh yang mencurigakan
+
+ron97 %>%
+  dplyr::filter(series_type == "level") %>%
+  dplyr::mutate(date_parsed = lubridate::dmy(date)) %>%
+  dplyr::filter(
+    date_parsed >= as.Date("2018-05-01"),
+    date_parsed <= as.Date("2019-02-01")
+  ) %>%
+  dplyr::select(date, date_parsed, ron97) %>%
+  tibble::as_tibble() %>%
+  dplyr::print(n = 50)
+
+df_future %>%
+  dplyr::select(date, price_ron97, price_brent, usd_myr) %>%
+  tibble::as_tibble() %>%
+  dplyr::print(n = Inf)
+
+View(df_future)
+
+print(
+  ron97 %>%
+    dplyr::filter(series_type == "level") %>%
+    dplyr::mutate(date_parsed = lubridate::dmy(date)) %>%
+    dplyr::filter(
+      date_parsed >= as.Date("2018-05-01"),
+      date_parsed <= as.Date("2019-02-01")
+    ) %>%
+    dplyr::select(date, date_parsed, ron97),
+  na.print = "NA"
+)
+
+print(
+  df_future %>%
+    dplyr::select(date, price_ron97, price_brent, usd_myr),
+  na.print = "NA"
+)
+
+str(ron97$date)
+head(ron97$date, 10)
+tail(ron97$date, 10)
+
+class(ron97_clean$date)
+
+
+
+
+
+
+
+
+
+
+
+# Pembahagian Data Kronologi: 80% Latihan (April 2017 - Julai 2024), 20% Ujian (Sept 2024 - April 2026)
 
 n_total <- nrow(df_final)           # 459
 n_train <- round(0.80 * n_total)    
